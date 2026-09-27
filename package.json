@@ -1,0 +1,52 @@
+{
+  "name": "@trustportidentity/beacon-node",
+  "version": "1.0.0",
+  "description": "Official TrustPort Beacon APM and Telemetry SDK for Node.js, Express, and NestJS",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./nestjs": {
+      "types": "./dist/nestjs.d.ts",
+      "default": "./dist/nestjs.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc"
+  },
+  "keywords": [
+    "apm",
+    "observability",
+    "tracing",
+    "beacon",
+    "nestjs",
+    "express",
+    "trustport"
+  ],
+  "author": "TrustPort",
+  "license": "MIT",
+  "peerDependencies": {
+    "@nestjs/common": "^9.0.0 || ^10.0.0 || ^11.0.0",
+    "@nestjs/core": "^9.0.0 || ^10.0.0 || ^11.0.0",
+    "rxjs": "^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@nestjs/common": { "optional": true },
+    "@nestjs/core": { "optional": true },
+    "rxjs": { "optional": true }
+  },
+  "devDependencies": {
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/core": "^10.0.0",
+    "@types/node": "^20.0.0",
+    "rxjs": "^7.8.1",
+    "typescript": "^5.4.0"
+  }
+}
