@@ -9,6 +9,13 @@ export interface BeaconConfig {
   flushIntervalMs?: number;
   /** Redacts Authorization/Cookie headers and masks obvious credit-card-like strings. */
   sanitizePii?: boolean;
+  /**
+   * Fraction of requests actually traced and sent to Beacon, from 0 (none) to 1 (all,
+   * the default). Lower it in high-traffic services to control ingest volume and stay
+   * within your plan's monthly quota - e.g. 0.1 traces ~10% of requests. Exceptions are
+   * always sent regardless of this setting. A value outside (0, 1] is treated as 1.
+   */
+  sampleRate?: number;
 }
 
 export interface BeaconUser {
@@ -158,6 +165,7 @@ export class BeaconSDK {
   private timer: ReturnType<typeof setInterval>;
 
   constructor(config: BeaconConfig) {
+    const sampleRate = config.sampleRate ?? 1;
     this.cfg = {
       ingestUrl: config.ingestUrl || 'http://localhost:8443',
       apiKey: config.apiKey,
@@ -165,6 +173,7 @@ export class BeaconSDK {
       environment: config.environment || 'production',
       batchSize: config.batchSize || 50,
       flushIntervalMs: config.flushIntervalMs || 1000,
+      sampleRate: sampleRate > 0 && sampleRate <= 1 ? sampleRate : 1,
       sanitizePii: config.sanitizePii,
     };
     this.timer = setInterval(() => void this.flush(), this.cfg.flushIntervalMs);
@@ -179,7 +188,18 @@ export class BeaconSDK {
     return trace.startSpan(name, type, metadata);
   }
 
+  /**
+   * Exceptions are always sent regardless of sampleRate - sampling controls ingest volume
+   * for routine traffic, never error visibility.
+   */
+  private shouldSample(hasException: boolean): boolean {
+    if (hasException || this.cfg.sampleRate >= 1) return true;
+    return Math.random() < this.cfg.sampleRate;
+  }
+
   private report(trace: ActiveTrace, request: BeaconRequestContext, durationMs: number, exception?: BeaconException): void {
+    if (!this.shouldSample(!!exception)) return;
+
     const sanitizedRequest: BeaconRequestContext = { ...request };
     if (this.cfg.sanitizePii) {
       if (sanitizedRequest.headers) {

@@ -52,4 +52,18 @@ import { BeaconInterceptor, BeaconModule } from '@trustportidentity/beacon-node/
 export class AppModule {}
 ```
 
+## Controlling ingest volume
+
+Every trace is already batched (`batchSize`/`flushIntervalMs`) instead of one network call
+per request. In high-traffic services, also set `sampleRate` (0–1, default 1) to trace only
+a fraction of requests — this is what actually keeps you inside your plan's monthly quota.
+Exceptions are always sent regardless of sampling.
+
+```ts
+const beacon = new BeaconSDK({
+  // ...
+  sampleRate: 0.2, // trace ~20% of requests
+});
+```
+
 See the full guide at [beacon.trustportidentity.com/help/node](https://beacon.trustportidentity.com/help/node).
