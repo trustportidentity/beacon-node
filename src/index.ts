@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomBytes } from 'node:crypto';
 
 export interface BeaconConfig {
   ingestUrl?: string;
@@ -7,7 +8,7 @@ export interface BeaconConfig {
   environment?: string;
   batchSize?: number;
   flushIntervalMs?: number;
-  /** Redacts Authorization/Cookie headers and masks obvious credit-card-like strings. */
+  /** Redacts additional sensitive string patterns like obvious credit-card-like strings. */
   sanitizePii?: boolean;
   /**
    * Fraction of requests actually traced and sent to Beacon, from 0 (none) to 1 (all,
@@ -42,6 +43,8 @@ export interface BeaconRequestContext {
 }
 
 export interface BeaconSpanData {
+  span_id?: string;
+  parent_span_id?: string;
   type: 'database' | 'cache' | 'http' | 'job' | 'middleware' | 'custom';
   name: string;
   start_ms: number;
@@ -57,6 +60,7 @@ export interface TraceEvent {
   environment: string;
   runtime: string;
   trace_id: string;
+  parent_span?: string;
   timestamp: string;
   duration_ms: number;
   user?: BeaconUser | null;
@@ -66,30 +70,86 @@ export interface TraceEvent {
   exception?: BeaconException;
 }
 
-const SENSITIVE_HEADERS = new Set(['authorization', 'cookie', 'set-cookie']);
+const ALWAYS_SENSITIVE_HEADERS = new Set([
+  'authorization',
+  'cookie',
+  'set-cookie',
+  'x-api-key',
+  'api-key',
+  'proxy-authorization',
+  'x-auth-token',
+  'x-csrf-token',
+  'x-xsrf-token',
+  'token',
+  'secret',
+  'password',
+]);
+
 const CARD_NUMBER_RE = /\b(?:\d[ -]*?){13,19}\b/g;
 
-function sanitizeHeaders(headers: Record<string, string>): Record<string, string> {
+export function sanitizeHeaders(headers: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(headers)) {
-    out[k] = SENSITIVE_HEADERS.has(k.toLowerCase()) ? '[redacted]' : v;
+    const lower = k.toLowerCase();
+    if (
+      ALWAYS_SENSITIVE_HEADERS.has(lower) ||
+      lower.includes('token') ||
+      lower.includes('secret') ||
+      (lower.includes('key') && lower !== 'key')
+    ) {
+      out[k] = '[Filtered]';
+    } else {
+      out[k] = v;
+    }
   }
   return out;
 }
 
-function sanitizeString(value: string): string {
+export function sanitizeString(value: string): string {
   return value.replace(CARD_NUMBER_RE, '[redacted-card]');
 }
 
-function cryptoRandomId(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID();
+export function generateTraceId(): string {
+  return randomBytes(16).toString('hex');
+}
+
+export function generateSpanId(): string {
+  return randomBytes(8).toString('hex');
+}
+
+export interface ParsedTraceparent {
+  traceId: string;
+  parentSpanId: string;
+  sampled: boolean;
+}
+
+export function parseTraceparent(header?: string | string[]): ParsedTraceparent | null {
+  if (!header) return null;
+  const raw = Array.isArray(header) ? header[0] : header;
+  const trimmed = raw.trim();
+  if (trimmed.length !== 55) return null;
+  const parts = trimmed.split('-');
+  if (parts.length !== 4) return null;
+  if (parts[0].length !== 2 || parts[1].length !== 32 || parts[2].length !== 16 || parts[3].length !== 2) {
+    return null;
   }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  if (!/^[0-9a-f]{32}$/i.test(parts[1]) || !/^[0-9a-f]{16}$/i.test(parts[2])) {
+    return null;
+  }
+  if (parts[1] === '00000000000000000000000000000000' || parts[2] === '0000000000000000') {
+    return null;
+  }
+  return {
+    traceId: parts[1].toLowerCase(),
+    parentSpanId: parts[2].toLowerCase(),
+    sampled: parts[3] === '01',
+  };
 }
 
 /** A single in-flight span. Call end() when the operation completes. */
 export class Span {
+  readonly spanId: string;
+  readonly parentSpanId: string;
   private tags: Record<string, string> = {};
   private startedAt: number;
 
@@ -99,6 +159,8 @@ export class Span {
     private readonly name: string,
     private readonly metadata?: Record<string, unknown>,
   ) {
+    this.spanId = generateSpanId();
+    this.parentSpanId = trace.spanId;
     this.startedAt = performance.now();
   }
 
@@ -111,6 +173,8 @@ export class Span {
     const durationMs = performance.now() - this.startedAt;
     const startMs = this.startedAt - this.trace.startedAt;
     this.trace.spans.push({
+      span_id: this.spanId,
+      parent_span_id: this.parentSpanId,
       type: this.type,
       name: this.name,
       start_ms: Math.max(0, Math.round(startMs * 100) / 100),
@@ -124,13 +188,28 @@ export class Span {
 /** Per-request trace state, held alive for the request's lifetime via AsyncLocalStorage. */
 export class ActiveTrace {
   readonly traceId: string;
+  readonly spanId: string;
+  readonly parentSpanId?: string;
   readonly startedAt: number;
   readonly spans: BeaconSpanData[] = [];
   user: BeaconUser | null = null;
 
-  constructor(traceId: string) {
-    this.traceId = traceId;
+  constructor(headerOrTraceId?: string) {
+    const parsed = parseTraceparent(headerOrTraceId);
+    if (parsed) {
+      this.traceId = parsed.traceId;
+      this.parentSpanId = parsed.parentSpanId;
+    } else if (headerOrTraceId && headerOrTraceId.trim().length > 0) {
+      this.traceId = headerOrTraceId.trim();
+    } else {
+      this.traceId = generateTraceId();
+    }
+    this.spanId = generateSpanId();
     this.startedAt = performance.now();
+  }
+
+  get traceparent(): string {
+    return `00-${this.traceId}-${this.spanId}-01`;
   }
 
   identify(user: BeaconUser): void {
@@ -184,7 +263,7 @@ export class BeaconSDK {
 
   /** Starts a span on the request currently being handled (via AsyncLocalStorage). */
   startSpan(name: string, type: BeaconSpanData['type'] = 'custom', metadata?: Record<string, unknown>): Span {
-    const trace = traceStorage.getStore() || new ActiveTrace(cryptoRandomId());
+    const trace = traceStorage.getStore() || new ActiveTrace();
     return trace.startSpan(name, type, metadata);
   }
 
@@ -201,10 +280,10 @@ export class BeaconSDK {
     if (!this.shouldSample(!!exception)) return;
 
     const sanitizedRequest: BeaconRequestContext = { ...request };
+    if (sanitizedRequest.headers) {
+      sanitizedRequest.headers = sanitizeHeaders(sanitizedRequest.headers);
+    }
     if (this.cfg.sanitizePii) {
-      if (sanitizedRequest.headers) {
-        sanitizedRequest.headers = sanitizeHeaders(sanitizedRequest.headers);
-      }
       sanitizedRequest.url = sanitizeString(sanitizedRequest.url);
     }
 
@@ -215,6 +294,7 @@ export class BeaconSDK {
       environment: this.cfg.environment,
       runtime: `node${process.version}`,
       trace_id: trace.traceId,
+      parent_span: trace.parentSpanId,
       timestamp: new Date().toISOString(),
       duration_ms: Math.round(durationMs * 100) / 100,
       user: trace.user,
@@ -263,8 +343,10 @@ export class BeaconSDK {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const sdk = this;
     return function beaconExpressMiddleware(req: any, res: any, next: () => void) {
-      const traceId = req.headers['traceparent'] || cryptoRandomId();
-      const trace = new ActiveTrace(traceId);
+      const trace = new ActiveTrace(req.headers?.['traceparent']);
+      if (typeof res.setHeader === 'function') {
+        res.setHeader('traceparent', trace.traceparent);
+      }
       const start = performance.now();
 
       res.on('finish', () => {
@@ -277,7 +359,7 @@ export class BeaconSDK {
             url: req.originalUrl || req.url,
             status_code: res.statusCode,
             headers: flattenHeaders(req.headers),
-            client_ip: req.ip || req.headers['x-forwarded-for'],
+            client_ip: req.ip || req.headers?.['x-forwarded-for'],
           },
           durationMs,
           res.statusCode >= 500
@@ -309,4 +391,10 @@ function flattenHeaders(headers: Record<string, string | string[] | undefined>):
   return out;
 }
 
-export { cryptoRandomId as generateTraceId };
+export function injectTraceparent(headers: Record<string, string>, trace?: ActiveTrace): Record<string, string> {
+  const active = trace || currentTrace();
+  if (active) {
+    headers['traceparent'] = active.traceparent;
+  }
+  return headers;
+}

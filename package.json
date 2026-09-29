@@ -19,6 +19,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "test": "node --test test/*.test.js",
     "prepare": "tsc"
   },
   "keywords": [
