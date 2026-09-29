@@ -79,3 +79,24 @@ test('injectTraceparent sets traceparent header', () => {
 
   assert.equal(headers.traceparent, trace.traceparent);
 });
+
+test('ActiveTrace captures breadcrumbs with bounding', () => {
+  const trace = new ActiveTrace();
+  trace.addBreadcrumb({
+    category: 'log',
+    message: 'User entered checkout step 1',
+    level: 'info',
+  });
+  trace.addBreadcrumb({
+    category: 'query',
+    message: 'SELECT * FROM carts WHERE user_id = 99',
+    level: 'info',
+    data: { duration_ms: 2.1 },
+  });
+
+  assert.equal(trace.breadcrumbs.length, 2);
+  assert.equal(trace.breadcrumbs[0].category, 'log');
+  assert.equal(trace.breadcrumbs[1].category, 'query');
+  assert.ok(trace.breadcrumbs[0].timestamp);
+});
+

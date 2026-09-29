@@ -53,6 +53,14 @@ export interface BeaconSpanData {
   tags?: Record<string, string>;
 }
 
+export interface BeaconBreadcrumb {
+  category: 'log' | 'http' | 'query' | 'navigation' | 'ui' | 'user' | 'error' | string;
+  message: string;
+  level?: 'info' | 'warning' | 'error' | 'debug';
+  timestamp?: string;
+  data?: Record<string, unknown>;
+}
+
 export interface TraceEvent {
   id: string;
   project_key: string;
@@ -66,6 +74,7 @@ export interface TraceEvent {
   user?: BeaconUser | null;
   request?: BeaconRequestContext;
   spans: BeaconSpanData[];
+  breadcrumbs?: BeaconBreadcrumb[];
   has_exception: boolean;
   exception?: BeaconException;
 }
@@ -192,6 +201,7 @@ export class ActiveTrace {
   readonly parentSpanId?: string;
   readonly startedAt: number;
   readonly spans: BeaconSpanData[] = [];
+  readonly breadcrumbs: BeaconBreadcrumb[] = [];
   user: BeaconUser | null = null;
 
   constructor(headerOrTraceId?: string) {
@@ -216,6 +226,16 @@ export class ActiveTrace {
     this.user = user;
   }
 
+  addBreadcrumb(crumb: BeaconBreadcrumb): void {
+    this.breadcrumbs.push({
+      ...crumb,
+      timestamp: crumb.timestamp || new Date().toISOString(),
+    });
+    if (this.breadcrumbs.length > 100) {
+      this.breadcrumbs.shift();
+    }
+  }
+
   startSpan(name: string, type: BeaconSpanData['type'] = 'custom', metadata?: Record<string, unknown>): Span {
     return new Span(this, type, name, metadata);
   }
@@ -231,6 +251,11 @@ export function currentTrace(): ActiveTrace | undefined {
 /** Attaches a user identity to the request currently being handled. */
 export function identify(user: BeaconUser): void {
   traceStorage.getStore()?.identify(user);
+}
+
+/** Records a breadcrumb into the currently active request trace. */
+export function addBreadcrumb(crumb: BeaconBreadcrumb): void {
+  traceStorage.getStore()?.addBreadcrumb(crumb);
 }
 
 /**
@@ -300,6 +325,7 @@ export class BeaconSDK {
       user: trace.user,
       request: sanitizedRequest,
       spans: trace.spans,
+      breadcrumbs: trace.breadcrumbs,
       has_exception: !!exception,
       exception,
     };
