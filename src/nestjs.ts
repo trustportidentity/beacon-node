@@ -26,7 +26,10 @@ export class BeaconInterceptor implements NestInterceptor {
     const req = context.switchToHttp().getRequest();
     const res = context.switchToHttp().getResponse();
     const start = performance.now();
-    const trace = new ActiveTrace(req.headers?.['traceparent'] || generateTraceId());
+    const trace = new ActiveTrace(req.headers?.['traceparent']);
+    if (typeof res?.setHeader === 'function') {
+      res.setHeader('traceparent', trace.traceparent);
+    }
 
     return this.beacon.runWithTrace(trace, () =>
       next.handle().pipe(
