@@ -100,3 +100,21 @@ test('ActiveTrace captures breadcrumbs with bounding', () => {
   assert.ok(trace.breadcrumbs[0].timestamp);
 });
 
+test('startJobSpan captures background queue and job attributes', () => {
+  const trace = new ActiveTrace();
+  const span = trace.startJobSpan('GenerateInvoicePDF', 'billing-queue', {
+    invoice_id: 'inv_123',
+    attempts: 1,
+  });
+  span.end();
+
+  assert.equal(trace.spans.length, 1);
+  const s = trace.spans[0];
+  assert.equal(s.type, 'job');
+  assert.equal(s.name, 'JOB GenerateInvoicePDF');
+  assert.equal(s.metadata.queue, 'billing-queue');
+  assert.equal(s.metadata.invoice_id, 'inv_123');
+  assert.equal(s.tags.job, 'GenerateInvoicePDF');
+  assert.equal(s.tags.queue, 'billing-queue');
+});
+

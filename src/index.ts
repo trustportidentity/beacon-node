@@ -239,6 +239,16 @@ export class ActiveTrace {
   startSpan(name: string, type: BeaconSpanData['type'] = 'custom', metadata?: Record<string, unknown>): Span {
     return new Span(this, type, name, metadata);
   }
+
+  startJobSpan(jobName: string, queueName?: string, metadata?: Record<string, unknown>): Span {
+    const meta = { ...metadata, ...(queueName ? { queue: queueName } : {}) };
+    const span = new Span(this, 'job', `JOB ${jobName}`, meta);
+    span.setTag('job', jobName);
+    if (queueName) {
+      span.setTag('queue', queueName);
+    }
+    return span;
+  }
 }
 
 const traceStorage = new AsyncLocalStorage<ActiveTrace>();
@@ -256,6 +266,11 @@ export function identify(user: BeaconUser): void {
 /** Records a breadcrumb into the currently active request trace. */
 export function addBreadcrumb(crumb: BeaconBreadcrumb): void {
   traceStorage.getStore()?.addBreadcrumb(crumb);
+}
+
+/** Starts a background job or queue execution span in the currently active request trace. */
+export function startJobSpan(jobName: string, queueName?: string, metadata?: Record<string, unknown>): Span | undefined {
+  return traceStorage.getStore()?.startJobSpan(jobName, queueName, metadata);
 }
 
 /**
