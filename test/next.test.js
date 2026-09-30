@@ -131,3 +131,19 @@ test('an error reported by withBeacon is not reported again by onRequestError', 
   await sdk.close();
   server.close();
 });
+
+test('error dedupe works across two loaded copies of the adapter (separate bundles)', async () => {
+  const { server, batches, url } = await startIngest();
+  resetSdk();
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'beacon-copy2-'));
+  for (const f of ['index.js', 'next.js']) fs.copyFileSync(path.join(__dirname, '../dist', f), path.join(dir, f));
+  const copyB = require(path.join(dir, 'next.js')); // a second, independent copy of the adapter
+  const sdk = initBeacon({ apiKey: 'tb_live_x', ingestUrl: url, serviceName: 'x' });
+  await assert.rejects(() => withBeacon(async () => { throw new Error('same failure'); }, { route: '/x' })(new Request('http://x.test/x'), {}));
+  await copyB.onRequestError(new Error('same failure'), { path: '/x', method: 'GET', headers: {} }, { routePath: '/x' });
+  await sdk.flush();
+  assert.equal(batches.flatMap((b) => b.events).filter((e) => e.request.route === '/x').length, 1);
+  await sdk.close();
+  server.close();
+});
