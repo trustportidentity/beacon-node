@@ -67,3 +67,40 @@ const beacon = new BeaconSDK({
 ```
 
 See the full guide at [beacon.trustportidentity.com/help/node](https://beacon.trustportidentity.com/help/node).
+
+## Next.js (App Router)
+
+Server runtime only (Node). Wrap route handlers; `identify()`, `startSpan()` and `addBreadcrumb()` work inside them without passing the request around. Everything is a no-op when no API key is configured, so wrapping is safe in every environment.
+
+```ts
+// instrumentation.ts (project root)
+export { onRequestError } from '@trustportidentity/beacon-node/next';
+
+export async function register() {
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    const { initBeacon } = await import('@trustportidentity/beacon-node/next');
+    initBeacon({
+      apiKey: process.env.BEACON_API_KEY ?? '',
+      ingestUrl: process.env.BEACON_ENDPOINT ?? 'https://beacon-api.trustportidentity.com',
+      serviceName: 'my-app',
+      environment: process.env.BEACON_ENVIRONMENT ?? 'production',
+      sampleRate: Number(process.env.BEACON_SAMPLE_RATE) || 1,
+    });
+  }
+}
+```
+
+```ts
+// app/api/things/route.ts
+import { withBeacon } from '@trustportidentity/beacon-node/next';
+import { identify } from '@trustportidentity/beacon-node';
+
+export const GET = withBeacon(async (req) => {
+  identify({ id: user.id, email: user.email }); // after you authenticate
+  return Response.json({ ok: true });
+}, { route: '/api/things' });
+```
+
+`onRequestError` reports errors thrown while rendering server components or in handlers that are not wrapped. Middleware runs on the Edge runtime and is not instrumented.
+
+Install straight from GitHub until the package is published: `npm i github:trustportidentity/beacon-node#<commit>`.
