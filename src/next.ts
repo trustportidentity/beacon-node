@@ -39,8 +39,29 @@ export function getBeacon(): BeaconSDK | null {
   return (globalThis as unknown as Holder)[GLOBAL_KEY] ?? null;
 }
 
-// Errors withBeacon has already reported, so Next's onRequestError doesn't report them again.
-const reportedErrors = new WeakSet<object>();
+// Next.js passes onRequestError a different error object than the one a wrapped handler threw,
+// so identity can't dedupe. Instead remember (path, message) for a few seconds: an error that
+// withBeacon already reported is not reported a second time by the framework hook.
+const RECENT_ERROR_TTL_MS = 10_000;
+const recentErrors = new Map<string, number>();
+
+function errorKey(path: string, message: string): string {
+  return `${path}\u0000${message}`;
+}
+
+function rememberError(paths: string[], message: string): void {
+  const now = Date.now();
+  for (const [k, at] of recentErrors) if (now - at > RECENT_ERROR_TTL_MS) recentErrors.delete(k);
+  for (const p of paths) recentErrors.set(errorKey(p, message), now);
+}
+
+function alreadyReported(paths: string[], message: string): boolean {
+  const now = Date.now();
+  return paths.some((p) => {
+    const at = recentErrors.get(errorKey(p, message));
+    return at !== undefined && now - at <= RECENT_ERROR_TTL_MS;
+  });
+}
 
 type RouteHandler<C> = (req: Request, ctx: C) => Promise<Response> | Response;
 
@@ -84,7 +105,7 @@ export function withBeacon<C = unknown>(handler: RouteHandler<C>, options: WithB
       res = await sdk.runWithTrace(trace, () => Promise.resolve(handler(req, ctx)));
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err));
-      if (err && typeof err === 'object') reportedErrors.add(err);
+      rememberError([options.route || url.pathname, url.pathname], e.message);
       sdk.reportTrace(trace, { ...request, status_code: 500 }, performance.now() - start, {
         type: e.name || 'Error',
         message: e.message,
@@ -112,8 +133,8 @@ export async function onRequestError(
 ): Promise<void> {
   const sdk = getBeacon();
   if (!sdk) return;
-  if (err && typeof err === 'object' && reportedErrors.has(err)) return;
   const e = err instanceof Error ? err : new Error(String(err));
+  if (alreadyReported([context.routePath || '', request.path], e.message)) return;
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(request.headers || {})) {
     if (typeof v === 'string') headers[k] = v;

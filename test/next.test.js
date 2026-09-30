@@ -120,9 +120,14 @@ test('an error reported by withBeacon is not reported again by onRequestError', 
   const sdk = initBeacon({ apiKey: 'tb_live_once', ingestUrl: url, serviceName: 'once' });
   const err = new Error('once only');
   await assert.rejects(() => withBeacon(async () => { throw err; }, { route: '/once' })(new Request('http://x.test/once'), {}));
-  await onRequestError(err, { path: '/once', method: 'GET', headers: {} }, { routePath: '/once' });
+  // Next passes the hook a different Error instance with the same message.
+  await onRequestError(new Error('once only'), { path: '/once', method: 'GET', headers: {} }, { routePath: '/once' });
+  // A genuinely different error on the same route must still be reported.
+  await onRequestError(new Error('a different failure'), { path: '/once', method: 'GET', headers: {} }, { routePath: '/once' });
   await sdk.flush();
-  assert.equal(batches.flatMap((b) => b.events).filter((e) => e.request.route === '/once').length, 1);
+  const once = batches.flatMap((b) => b.events).filter((e) => e.request.route === '/once');
+  assert.equal(once.length, 2);
+  assert.deepEqual(once.map((e) => e.exception.message).sort(), ['a different failure', 'once only']);
   await sdk.close();
   server.close();
 });
