@@ -2,16 +2,16 @@
  * Next.js adapter (App Router route handlers, server runtime).
  *
  *   // instrumentation.ts
- *   export { onRequestError } from '@trustportidentity/beacon-node/next';
+ *   export { onRequestError } from '@trusportidentity/beacon-node/next';
  *   export async function register() {
  *     if (process.env.NEXT_RUNTIME === 'nodejs') {
- *       const { initBeacon } = await import('@trustportidentity/beacon-node/next');
+ *       const { initBeacon } = await import('@trusportidentity/beacon-node/next');
  *       initBeacon({ apiKey: process.env.BEACON_API_KEY!, ingestUrl: process.env.BEACON_ENDPOINT, serviceName: 'my-app' });
  *     }
  *   }
  *
  *   // app/api/things/route.ts
- *   import { withBeacon } from '@trustportidentity/beacon-node/next';
+ *   import { withBeacon } from '@trusportidentity/beacon-node/next';
  *   export const GET = withBeacon(async (req) => Response.json({ ok: true }), { route: '/api/things' });
  *
  * Inside a wrapped handler, identify(), startSpan() and addBreadcrumb() from the main entry

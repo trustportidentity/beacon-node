@@ -1,18 +1,18 @@
-# @trustportidentity/beacon-node
+# @trusportidentity/beacon-node
 
 Official TrustPort Beacon APM SDK for Node.js, Express, and NestJS.
 
 ## Install
 
 ```bash
-npm install @trustportidentity/beacon-node
+npm install @trusportidentity/beacon-node
 ```
 
 ## Express
 
 ```ts
 import express from 'express';
-import { BeaconSDK } from '@trustportidentity/beacon-node';
+import { BeaconSDK } from '@trusportidentity/beacon-node';
 
 const app = express();
 const beacon = new BeaconSDK({
@@ -37,7 +37,7 @@ app.get('/api/v1/invoices', async (req, res) => {
 ```ts
 import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
-import { BeaconInterceptor, BeaconModule } from '@trustportidentity/beacon-node/nestjs';
+import { BeaconInterceptor, BeaconModule } from '@trusportidentity/beacon-node/nestjs';
 
 @Module({
   imports: [
@@ -74,11 +74,11 @@ Server runtime only (Node). Wrap route handlers; `identify()`, `startSpan()` and
 
 ```ts
 // instrumentation.ts (project root)
-export { onRequestError } from '@trustportidentity/beacon-node/next';
+export { onRequestError } from '@trusportidentity/beacon-node/next';
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    const { initBeacon } = await import('@trustportidentity/beacon-node/next');
+    const { initBeacon } = await import('@trusportidentity/beacon-node/next');
     initBeacon({
       apiKey: process.env.BEACON_API_KEY ?? '',
       ingestUrl: process.env.BEACON_ENDPOINT ?? 'https://beacon-api.trustportidentity.com',
@@ -92,8 +92,8 @@ export async function register() {
 
 ```ts
 // app/api/things/route.ts
-import { withBeacon } from '@trustportidentity/beacon-node/next';
-import { identify } from '@trustportidentity/beacon-node';
+import { withBeacon } from '@trusportidentity/beacon-node/next';
+import { identify } from '@trusportidentity/beacon-node';
 
 export const GET = withBeacon(async (req) => {
   identify({ id: user.id, email: user.email }); // after you authenticate
