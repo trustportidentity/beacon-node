@@ -251,7 +251,12 @@ export class ActiveTrace {
   }
 }
 
-const traceStorage = new AsyncLocalStorage<ActiveTrace>();
+// One store per process, not per copy of this module. Bundlers (Next.js, webpack) can load the SDK
+// more than once, e.g. separately for instrumentation.ts and for route handlers; a module-level
+// store would then be invisible across copies and identify()/addBreadcrumb() would silently no-op.
+const TRACE_STORAGE_KEY = Symbol.for('trustportidentity.beacon.trace-storage');
+const globalStore = globalThis as unknown as Record<symbol, AsyncLocalStorage<ActiveTrace> | undefined>;
+const traceStorage: AsyncLocalStorage<ActiveTrace> = (globalStore[TRACE_STORAGE_KEY] ??= new AsyncLocalStorage<ActiveTrace>());
 
 /** Returns the active trace for the request currently being handled, if any. */
 export function currentTrace(): ActiveTrace | undefined {
