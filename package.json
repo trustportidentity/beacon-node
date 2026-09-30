@@ -1,5 +1,5 @@
 {
-  "name": "@trustportidentity/beacon-node",
+  "name": "@trusportidentity/beacon-node",
   "version": "1.0.0",
   "description": "Official TrustPort Beacon APM and Telemetry SDK for Node.js, Express, NestJS and Next.js",
   "main": "dist/index.js",
