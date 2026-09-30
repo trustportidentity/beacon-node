@@ -1,0 +1,30 @@
+name: Publish to npm
+
+# Publishes when a GitHub release is published, or by hand from the Actions tab.
+# Uses npm trusted publishing (OIDC): no token needed once the package has a trusted publisher
+# configured on npmjs.com (package settings -> Trusted Publisher -> GitHub Actions, repo
+# trustportidentity/beacon-node, workflow publish.yml). The very first version must be published
+# manually (or with an NPM_TOKEN secret, which this workflow also honours).
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm test
+      - run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
