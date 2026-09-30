@@ -43,7 +43,10 @@ export function getBeacon(): BeaconSDK | null {
 // so identity can't dedupe. Instead remember (path, message) for a few seconds: an error that
 // withBeacon already reported is not reported a second time by the framework hook.
 const RECENT_ERROR_TTL_MS = 10_000;
-const recentErrors = new Map<string, number>();
+// Process-wide (not module-level): the framework hook and the wrapper can live in different bundles.
+const RECENT_KEY = Symbol.for('trustportidentity.beacon.recent-errors');
+const recentHolder = globalThis as unknown as Record<symbol, Map<string, number> | undefined>;
+const recentErrors: Map<string, number> = (recentHolder[RECENT_KEY] ??= new Map<string, number>());
 
 function errorKey(path: string, message: string): string {
   return `${path}\u0000${message}`;
