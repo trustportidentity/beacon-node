@@ -4,6 +4,9 @@ const http = require('node:http');
 const { initBeacon, getBeacon, withBeacon, onRequestError } = require('../dist/next.js');
 const { identify, currentTrace, addBreadcrumb } = require('../dist/index.js');
 
+const SDK_KEY = Symbol.for('trustportidentity.beacon.sdk');
+const resetSdk = () => { globalThis[SDK_KEY] = undefined; };
+
 function startIngest() {
   const batches = [];
   const server = http.createServer((req, res) => {
@@ -18,6 +21,7 @@ function startIngest() {
 }
 
 test('withBeacon is a transparent passthrough when Beacon is not initialised', async () => {
+  resetSdk();
   initBeacon({ apiKey: '', serviceName: 'x' });
   assert.equal(getBeacon(), null);
   const res = await withBeacon(async () => new Response('hi', { status: 201 }))(new Request('http://a.test/x'), {});
@@ -27,6 +31,7 @@ test('withBeacon is a transparent passthrough when Beacon is not initialised', a
 
 test('withBeacon reports user, spans, breadcrumbs, status and errors', async () => {
   const { server, batches, url } = await startIngest();
+  resetSdk();
   const sdk = initBeacon({ apiKey: 'tb_live_test', ingestUrl: url, serviceName: 'eirs-mail', environment: 'production' });
   assert.ok(sdk);
 
@@ -81,6 +86,43 @@ test('withBeacon reports user, spans, breadcrumbs, status and errors', async () 
   const e4 = events.find((e) => e.request.route === '/mail');
   assert.equal(e4.exception.message, 'render failed');
 
+  await sdk.close();
+  server.close();
+});
+
+test('identify() works across two loaded copies of the SDK (bundlers load it twice)', async () => {
+  const { server, batches, url } = await startIngest();
+  resetSdk();
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+  // Copy A (the real dist) creates the SDK and runs the request; copy B is the same code loaded
+  // as a separate module instance, like a second bundle. B's identify() must still reach A's trace.
+  const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'beacon-copy-')), 'index.js');
+  fs.copyFileSync(path.join(__dirname, '../dist/index.js'), tmp);
+  const copyB = require(tmp);
+  assert.notEqual(copyB.identify, require('../dist/index.js').identify, 'must be a distinct module instance');
+  const sdk = initBeacon({ apiKey: 'tb_live_dup', ingestUrl: url, serviceName: 'dup' });
+  await withBeacon(async () => {
+    copyB.identify({ id: 'cross', email: 'cross@copy.ng' });
+    copyB.addBreadcrumb({ category: 'user', message: 'from copy B' });
+    return new Response('ok');
+  }, { route: '/dup' })(new Request('http://x.test/dup'), {});
+  await sdk.flush();
+  const ev = batches.flatMap((b) => b.events).find((e) => e.request.route === '/dup');
+  assert.equal(ev.user.email, 'cross@copy.ng');
+  assert.equal(ev.breadcrumbs.length, 1);
+  await sdk.close();
+  server.close();
+});
+
+test('an error reported by withBeacon is not reported again by onRequestError', async () => {
+  const { server, batches, url } = await startIngest();
+  resetSdk();
+  const sdk = initBeacon({ apiKey: 'tb_live_once', ingestUrl: url, serviceName: 'once' });
+  const err = new Error('once only');
+  await assert.rejects(() => withBeacon(async () => { throw err; }, { route: '/once' })(new Request('http://x.test/once'), {}));
+  await onRequestError(err, { path: '/once', method: 'GET', headers: {} }, { routePath: '/once' });
+  await sdk.flush();
+  assert.equal(batches.flatMap((b) => b.events).filter((e) => e.request.route === '/once').length, 1);
   await sdk.close();
   server.close();
 });

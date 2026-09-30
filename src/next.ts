@@ -39,6 +39,9 @@ export function getBeacon(): BeaconSDK | null {
   return (globalThis as unknown as Holder)[GLOBAL_KEY] ?? null;
 }
 
+// Errors withBeacon has already reported, so Next's onRequestError doesn't report them again.
+const reportedErrors = new WeakSet<object>();
+
 type RouteHandler<C> = (req: Request, ctx: C) => Promise<Response> | Response;
 
 export interface WithBeaconOptions {
@@ -81,6 +84,7 @@ export function withBeacon<C = unknown>(handler: RouteHandler<C>, options: WithB
       res = await sdk.runWithTrace(trace, () => Promise.resolve(handler(req, ctx)));
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err));
+      if (err && typeof err === 'object') reportedErrors.add(err);
       sdk.reportTrace(trace, { ...request, status_code: 500 }, performance.now() - start, {
         type: e.name || 'Error',
         message: e.message,
@@ -108,6 +112,7 @@ export async function onRequestError(
 ): Promise<void> {
   const sdk = getBeacon();
   if (!sdk) return;
+  if (err && typeof err === 'object' && reportedErrors.has(err)) return;
   const e = err instanceof Error ? err : new Error(String(err));
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(request.headers || {})) {
