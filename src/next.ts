@@ -39,6 +39,18 @@ export function getBeacon(): BeaconSDK | null {
   return (globalThis as unknown as Holder)[GLOBAL_KEY] ?? null;
 }
 
+/**
+ * Report an error you caught and handled, so it appears in Beacon as an issue (marked handled) instead of only
+ * in the console. Safe to call anywhere; does nothing when Beacon is not initialised.
+ */
+export function captureException(err: unknown, context?: { route?: string; method?: string; tags?: Record<string, string> }): void {
+  try {
+    getBeacon()?.captureException(err, context);
+  } catch {
+    // telemetry must never break the app
+  }
+}
+
 // Next.js passes onRequestError a different error object than the one a wrapped handler threw,
 // so identity can't dedupe. Instead remember (path, message) for a few seconds: an error that
 // withBeacon already reported is not reported a second time by the framework hook.
@@ -137,6 +149,7 @@ export async function onRequestError(
   const sdk = getBeacon();
   if (!sdk) return;
   const e = err instanceof Error ? err : new Error(String(err));
+  if (sdk.isIgnoredError(e.message)) return; // e.g. Next's stale-deploy 'Failed to find Server Action'
   if (alreadyReported([context.routePath || '', request.path], e.message)) return;
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(request.headers || {})) {
