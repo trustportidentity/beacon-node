@@ -52,6 +52,13 @@ import { BeaconInterceptor, BeaconModule } from '@trusportidentity/beacon-node/n
 export class AppModule {}
 ```
 
+## Edge runtime safety (v1.1.1)
+
+Importing the SDK from code that Next.js bundles for the **edge runtime** (middleware, `instrumentation.ts`) used to
+crash with `Cannot find module 'node:crypto'` and turn every middleware-protected route into an HTTP 500. The package
+now ships edge-safe no-op entries that bundlers select automatically (`edge-light` / `worker` / `browser` conditions),
+so a stray import can never break a request. Telemetry itself only runs in the Node runtime.
+
 ## Handled errors and noise (v1.1)
 
 Errors you catch and handle never reach Beacon on their own. Report the ones that matter:
