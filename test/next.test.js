@@ -194,7 +194,8 @@ test('edge entries exist, are selected by the edge conditions, and import no Nod
     assert.ok(conds['edge-light'] && conds.workerd && conds.worker, `${entry} must have edge conditions`);
     for (const c of ['edge-light', 'workerd', 'worker', 'browser']) {
       const file = require('node:path').join(__dirname, '..', conds[c]);
-      const src = fs.readFileSync(file, 'utf8');
+      // Comments may mention node:crypto in prose; only real imports matter.
+      const src = fs.readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
       assert.ok(!/node:|require\(['"](fs|crypto|async_hooks|http|https|net|os|path)['"]\)/.test(src), `${conds[c]} must not import Node-only modules (it is bundled into Next.js middleware)`);
     }
   }
