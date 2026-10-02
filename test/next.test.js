@@ -147,3 +147,41 @@ test('error dedupe works across two loaded copies of the adapter (separate bundl
   await sdk.close();
   server.close();
 });
+
+test('captureException reports a handled error as an issue, with route and handled=true', async () => {
+  const { server, batches, url } = await startIngest();
+  resetSdk();
+  const { captureException } = require('../dist/next.js');
+  const sdk = initBeacon({ apiKey: 'tb_live_test', ingestUrl: url, serviceName: 'eirs-mail', environment: 'production' });
+  captureException(new Error('Failed to auto-add contacts'), { route: '/api/messages', tags: { user: 'a@b.ng' } });
+  await sdk.flush();
+  server.close();
+  const ev = batches.flatMap((b) => b.events).find((e) => e.exception && e.exception.message === 'Failed to auto-add contacts');
+  assert.ok(ev, 'handled error should arrive');
+  assert.equal(ev.exception.handled, true);
+  assert.equal(ev.has_exception, true);
+  assert.equal(ev.request.route, '/api/messages');
+});
+
+test('framework noise is ignored by default and extra patterns can be added', async () => {
+  const { server, batches, url } = await startIngest();
+  resetSdk();
+  const { captureException } = require('../dist/next.js');
+  const sdk = initBeacon({ apiKey: 'tb_live_test', ingestUrl: url, serviceName: 'x', ignoreErrors: ['ECONNRESET', /^benign/i] });
+  captureException(new Error('Failed to find Server Action "abc". This request might be from an older deployment'));
+  captureException(new Error('read ECONNRESET'));
+  captureException(new Error('Benign timeout'));
+  await onRequestError(new Error('Failed to find Server Action "x"'), { path: '/mail', method: 'POST', headers: {} }, { routePath: '/mail' });
+  captureException(new Error('real bug'));
+  await sdk.flush();
+  server.close();
+  const msgs = batches.flatMap((b) => b.events).filter((e) => e.exception).map((e) => e.exception.message);
+  assert.deepEqual(msgs, ['real bug']);
+});
+
+test('captureException is a silent no-op when Beacon is not initialised', () => {
+  resetSdk();
+  const { captureException } = require('../dist/next.js');
+  initBeacon({ apiKey: '', serviceName: 'x' });
+  assert.doesNotThrow(() => captureException(new Error('x')));
+});

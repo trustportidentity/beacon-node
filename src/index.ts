@@ -17,7 +17,16 @@ export interface BeaconConfig {
    * always sent regardless of this setting. A value outside (0, 1] is treated as 1.
    */
   sampleRate?: number;
+  /**
+   * Error messages that are never reported as exceptions: strings match as case-insensitive substrings,
+   * RegExps match as given. Next.js's "Failed to find Server Action" (browsers holding a page from before a
+   * deploy) is ignored by default; pass `ignoreErrors: []` ... or extra entries to add to that default.
+   */
+  ignoreErrors?: (string | RegExp)[];
 }
+
+/** Errors that are framework noise rather than bugs, ignored unless you opt out with includeDefaultIgnores. */
+export const DEFAULT_IGNORED_ERRORS: RegExp[] = [/Failed to find Server Action/i];
 
 export interface BeaconUser {
   id?: string;
@@ -284,7 +293,8 @@ export function startJobSpan(jobName: string, queueName?: string, metadata?: Rec
  * for NestJS.
  */
 export class BeaconSDK {
-  private readonly cfg: Required<Omit<BeaconConfig, 'sanitizePii'>> & Pick<BeaconConfig, 'sanitizePii'>;
+  private readonly cfg: Required<Omit<BeaconConfig, 'sanitizePii' | 'ignoreErrors'>> & Pick<BeaconConfig, 'sanitizePii'>;
+  private readonly ignored: (string | RegExp)[];
   private queue: TraceEvent[] = [];
   private timer: ReturnType<typeof setInterval>;
 
@@ -300,10 +310,40 @@ export class BeaconSDK {
       sampleRate: sampleRate > 0 && sampleRate <= 1 ? sampleRate : 1,
       sanitizePii: config.sanitizePii,
     };
+    this.ignored = [...DEFAULT_IGNORED_ERRORS, ...(config.ignoreErrors ?? [])];
     this.timer = setInterval(() => void this.flush(), this.cfg.flushIntervalMs);
     if (typeof this.timer === 'object' && 'unref' in this.timer) {
       (this.timer as NodeJS.Timeout).unref();
     }
+  }
+
+  /** True when an error message matches the ignore list (framework noise that should not become an issue). */
+  isIgnoredError(message: string): boolean {
+    return this.ignored.some((p) => (typeof p === 'string' ? message.toLowerCase().includes(p.toLowerCase()) : p.test(message)));
+  }
+
+  /**
+   * Reports an error you caught and handled (a fallback ran, the request still succeeded) so it shows up as an
+   * issue instead of vanishing into the console. Attaches to the request being handled when there is one.
+   */
+  captureException(err: unknown, context: { route?: string; method?: string; tags?: Record<string, string> } = {}): void {
+    const e = err instanceof Error ? err : new Error(typeof err === 'string' ? err : JSON.stringify(err));
+    if (this.isIgnoredError(e.message)) return;
+    const trace = traceStorage.getStore() || new ActiveTrace();
+    for (const [k, v] of Object.entries(context.tags ?? {})) {
+      trace.addBreadcrumb({ category: 'tag', message: `${k}=${v}`, level: 'info' });
+    }
+    this.report(
+      trace,
+      { method: context.method || 'HANDLED', route: context.route || 'handled-error', url: context.route || 'handled-error', status_code: 200 },
+      0,
+      {
+        type: e.name || 'Error',
+        message: e.message,
+        handled: true,
+        stacktrace: (e.stack || '').split('\n').slice(1, 30).map((line) => ({ file: line.trim(), line: 0, function: '' })),
+      },
+    );
   }
 
   /** Starts a span on the request currently being handled (via AsyncLocalStorage). */

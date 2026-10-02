@@ -52,6 +52,27 @@ import { BeaconInterceptor, BeaconModule } from '@trusportidentity/beacon-node/n
 export class AppModule {}
 ```
 
+## Handled errors and noise (v1.1)
+
+Errors you catch and handle never reach Beacon on their own. Report the ones that matter:
+
+```ts
+import { captureException } from '@trusportidentity/beacon-node/next';
+
+try {
+  await prisma.contact.create({ data });
+} catch (err) {
+  captureException(err, { route: '/api/messages', tags: { feature: 'contacts' } }); // shows up as a handled issue
+}
+```
+
+Framework noise is ignored for you: Next.js's `Failed to find Server Action` (a browser holding a page from before a
+deploy) is dropped by default. Add your own with `ignoreErrors` (substring or RegExp):
+
+```ts
+initBeacon({ /* ... */ ignoreErrors: ['ECONNRESET', /^AbortError/] });
+```
+
 ## Controlling ingest volume
 
 Every trace is already batched (`batchSize`/`flushIntervalMs`) instead of one network call
