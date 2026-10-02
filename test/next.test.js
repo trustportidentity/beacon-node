@@ -185,3 +185,24 @@ test('captureException is a silent no-op when Beacon is not initialised', () => 
   initBeacon({ apiKey: '', serviceName: 'x' });
   assert.doesNotThrow(() => captureException(new Error('x')));
 });
+
+test('edge entries exist, are selected by the edge conditions, and import no Node-only modules', () => {
+  const fs = require('node:fs');
+  const pkg = JSON.parse(fs.readFileSync(require.resolve('../package.json'), 'utf8'));
+  for (const entry of ['.', './next']) {
+    const conds = pkg.exports[entry];
+    assert.ok(conds['edge-light'] && conds.workerd && conds.worker, `${entry} must have edge conditions`);
+    for (const c of ['edge-light', 'workerd', 'worker', 'browser']) {
+      const file = require('node:path').join(__dirname, '..', conds[c]);
+      const src = fs.readFileSync(file, 'utf8');
+      assert.ok(!/node:|require\(['"](fs|crypto|async_hooks|http|https|net|os|path)['"]\)/.test(src), `${conds[c]} must not import Node-only modules (it is bundled into Next.js middleware)`);
+    }
+  }
+  // The stub is behaviour-compatible: nothing throws.
+  const edge = require('../dist/next.edge.js');
+  assert.equal(edge.initBeacon({ apiKey: 'k', serviceName: 's' }), null);
+  assert.equal(edge.getBeacon(), null);
+  const h = () => 'ok';
+  assert.equal(edge.withBeacon(h), h);
+  assert.doesNotThrow(() => edge.captureException(new Error('x')));
+});
